@@ -154,6 +154,12 @@ st.markdown("""
     section[data-testid="stSidebar"] .stSelectbox label,
     section[data-testid="stSidebar"] .stSlider label,
     section[data-testid="stSidebar"] .stMultiSelect label { color: #A8C5DA !important; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; }
+    section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] *,
+    section[data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] *,
+    section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] input,
+    section[data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] input {
+        color: #1D3557 !important;
+    }
 
     /* Tabla */
     .dataframe { font-size: 0.83rem; }
@@ -235,6 +241,17 @@ ORDER BY total DESC
 Q_TOP_N = """
 MATCH (p:Persona)
 WHERE ($nivel = 'TODOS' OR p.risk_level = $nivel)
+  AND ($comunidades IS NULL OR size($comunidades) = 0 OR p.community_id IN $comunidades)
+WITH p,
+     CASE $metrica
+       WHEN 'risk_tel' THEN coalesce(p.risk_tel, 0)
+       WHEN 'risk_device' THEN coalesce(p.risk_device, 0)
+       WHEN 'risk_ip' THEN coalesce(p.risk_ip, 0)
+       WHEN 'risk_dom' THEN coalesce(p.risk_dom, 0)
+       ELSE coalesce(p.risk_score, 0)
+     END AS ranking_metrica
+ORDER BY ranking_metrica DESC, coalesce(p.risk_score, 0) DESC
+LIMIT $top_n
 RETURN
   p.id_persona      AS id_persona,
   p.nombre + ' ' + coalesce(p.apellido_paterno,'') + ' ' + coalesce(p.apellido_materno,'') AS nombre,
@@ -247,18 +264,17 @@ RETURN
   p.similarity_flag AS similarity_flag,
   p.community_id    AS community_id,
   p.es_fraude       AS es_fraude
-ORDER BY risk_score DESC
-LIMIT $top_n
 """
 
 Q_FACTORES = """
 MATCH (p:Persona)
 WHERE ($nivel = 'TODOS' OR p.risk_level = $nivel)
+  AND ($comunidades IS NULL OR size($comunidades) = 0 OR p.community_id IN $comunidades)
 RETURN
-  round(avg(p.risk_tel),    2) AS Telefono,
-  round(avg(p.risk_device), 2) AS Dispositivo,
-  round(avg(p.risk_ip),     2) AS IP,
-  round(avg(p.risk_dom),    2) AS Domicilio
+  coalesce(round(avg(p.risk_tel),    2), 0) AS Telefono,
+  coalesce(round(avg(p.risk_device), 2), 0) AS Dispositivo,
+  coalesce(round(avg(p.risk_ip),     2), 0) AS IP,
+  coalesce(round(avg(p.risk_dom),    2), 0) AS Domicilio
 """
 
 Q_COMUNIDADES = """
@@ -775,8 +791,16 @@ def main():
     with st.spinner("Cargando datos desde Neo4j..."):
         df_kpis_raw     = run_query(driver, Q_KPIS)
         df_dist         = run_query(driver, Q_DISTRIBUCION)
-        df_top          = run_query(driver, Q_TOP_N, {"nivel": nivel, "top_n": top_n})
-        df_factores     = run_query(driver, Q_FACTORES, {"nivel": nivel})
+        df_top          = run_query(driver, Q_TOP_N, {
+            "nivel": nivel,
+            "top_n": top_n,
+            "comunidades": comunidades_sel,
+            "metrica": metrica,
+        })
+        df_factores     = run_query(driver, Q_FACTORES, {
+            "nivel": nivel,
+            "comunidades": comunidades_sel,
+        })
         df_comunidades  = run_query(driver, Q_COMUNIDADES)
         df_fraude_real  = run_query(driver, Q_FRAUDE_REAL)
         df_timeline     = run_query(driver, Q_TIMELINE)
@@ -797,10 +821,6 @@ def main():
             "No se encontró la propiedad `risk_level` en los nodos Persona. "
             "Ejecuta primero las consultas de scoring en Neo4j (ver documentación)."
         )
-
-    # Filtrar por comunidad si se seleccionó alguna
-    if comunidades_sel and not df_top.empty and "community_id" in df_top.columns:
-        df_top = df_top[df_top["community_id"].isin(comunidades_sel)]
 
     # =========================================================================
     # KPIs
