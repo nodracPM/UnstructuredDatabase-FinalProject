@@ -665,19 +665,38 @@ def render_sidebar(driver) -> dict:
             index=0,
         )
 
-        # Comunidades disponibles
-        df_com = run_query(driver, "MATCH (p:Persona) WHERE p.community_id IS NOT NULL RETURN DISTINCT p.community_id AS cid ORDER BY cid")
+        # Comunidades disponibles, ordenadas por score promedio de riesgo
+        df_com = run_query(driver, """
+        MATCH (p:Persona)
+        WHERE p.community_id IS NOT NULL
+        WITH p.community_id AS cid,
+             coalesce(round(avg(p.risk_score), 2), 0) AS score_promedio,
+             count(*) AS total_clientes
+        RETURN cid, score_promedio, total_clientes
+        ORDER BY score_promedio DESC, total_clientes DESC, cid
+        """)
         if df_com.empty:
             st.info("community_id no disponible.\nEjecuta Louvain en Neo4j.")
             comunidades_disponibles = []
+            score_comunidades = {}
         else:
-            comunidades_disponibles = sorted(df_com["cid"].dropna().unique().tolist())
+            df_com = df_com.dropna(subset=["cid"])
+            comunidades_disponibles = df_com["cid"].tolist()
+            score_comunidades = dict(zip(df_com["cid"], df_com["score_promedio"]))
+
+        def formato_comunidad(cid):
+            score = score_comunidades.get(cid)
+            try:
+                return f"Grupo {cid} · score {float(score):.2f}"
+            except (TypeError, ValueError):
+                return f"Grupo {cid}"
 
         comunidad_sel = st.multiselect(
             "Grupos sospechosos (community_id)",
             options=comunidades_disponibles,
             default=[],
             placeholder="Todos los grupos",
+            format_func=formato_comunidad,
         )
 
         metrica = st.selectbox(

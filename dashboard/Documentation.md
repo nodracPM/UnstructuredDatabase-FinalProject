@@ -16,6 +16,22 @@ AND ($comunidades IS NULL OR size($comunidades) = 0 OR p.community_id IN $comuni
 
 The selected groups are passed directly to Neo4j through the `comunidades` parameter. The later pandas filtering step was removed because it was filtering too late.
 
+### Orden de grupos sospechosos
+
+The `Grupos sospechosos` options are now ordered by the average `risk_score` of each `community_id`, descending. This makes the highest-risk groups appear first in the sidebar.
+
+The sidebar query returns:
+
+```cypher
+WITH p.community_id AS cid,
+     coalesce(round(avg(p.risk_score), 2), 0) AS score_promedio,
+     count(*) AS total_clientes
+RETURN cid, score_promedio, total_clientes
+ORDER BY score_promedio DESC, total_clientes DESC, cid
+```
+
+The option label shows both the group and its average score, for example `Grupo 12 · score 31.50`, but the selected value remains the raw `community_id` so the Neo4j filters keep receiving the expected IDs.
+
 ### Metrica principal del ranking
 
 Previously, `Q_TOP_N` always ordered clients by `risk_score`, even when the user selected another ranking metric such as `risk_tel`, `risk_device`, `risk_ip`, or `risk_dom`. The chart could re-sort the already-limited dataframe, but relevant clients may already have been excluded by the database query.
